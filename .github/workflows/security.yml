@@ -1,0 +1,67 @@
+# Is anything insecure on its way in?
+#
+# Credentials committed to the history, and unsafe patterns in the site's
+# JavaScript (DOM XSS and the like). Also runs weekly, because scanners learn
+# new rules without any code changing.
+#
+# There is no dependency audit: the site has no package manifest and loads no
+# third-party scripts. If one is added, add the package manager's audit here.
+
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 6 * * 1" # Mondays, 06:37 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: a key deleted in a later commit is still leaked,
+          # and on a public repository anyone can read it.
+          fetch-depth: 0
+          persist-credentials: false
+      # The image is pinned by digest: it reads the whole repository. False
+      # positives go in .gitleaksignore with a reason.
+      - name: Scan every commit with gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner --exit-code 1 .
+
+  codeql:
+    name: Static analysis (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # To upload the results to the repository's code scanning alerts.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Covers js/ and the scripts inside the HTML pages. Nothing to compile.
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:javascript-typescript
