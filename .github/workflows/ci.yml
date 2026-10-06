@@ -1,0 +1,60 @@
+# Does the site still hang together?
+#
+# This repository is a static HTML site (a freewebsitetemplates.com template):
+# no package manager, no build step, no tests. What can break is a page that
+# links to another page, image or stylesheet that was renamed or deleted, so
+# that is what this checks. Runs on every pull request and every push to main.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: Links & assets resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Every href and src in the pages, including #fragments, must point at a
+      # file that exists in the repository. Offline on purpose: the external
+      # links are the template author's social pages, and whether a third-party
+      # site is up today says nothing about this change.
+      - name: Check links between pages
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          lycheeVersion: v0.24.2
+          args: --offline --no-progress --include-fragments './**/*.html'
+          fail: true
+          jobSummary: true
+
+      # lychee does not read CSS, so background images referenced with url()
+      # would break silently.
+      - name: Check images referenced from stylesheets
+        run: |
+          status=0
+          while IFS= read -r css; do
+            dir=$(dirname "$css")
+            while IFS= read -r ref; do
+              case "$ref" in http:*|https:*|data:*|//*|"") continue ;; esac
+              if [ ! -f "$dir/${ref%%[?#]*}" ]; then
+                echo "::error file=$css::url($ref) does not exist"
+                status=1
+              fi
+            done < <(grep -oE 'url\([^)]*\)' "$css" | sed -E "s/^url\(['\"]?//; s/['\"]?\)$//")
+          done < <(git ls-files '*.css')
+          exit $status

@@ -1,0 +1,19 @@
+# Keeps the pinned versions of the actions that check this site current.
+# The site has no package manifest, so GitHub Actions is the only ecosystem.
+# Updates arrive as one grouped pull request a week, and nothing under a week
+# old, which is when most malicious releases are caught and pulled.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
